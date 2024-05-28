@@ -80,6 +80,7 @@ bool debug = 0;
 //bool process_redundant = 0;
 //bool process_compact = 0;
 bool process_56 = 0;
+bool output_sql_inserts = 0;
 char blob_dir[256] = ".";
 char dump_prefix[256] = "default";
 char path_ibdata[256];
@@ -138,27 +139,30 @@ ut_print_buf(
 ulint process_ibrec(page_t *page, rec_t *rec, table_def_t *table, ulint *offsets, bool hex) {
 	ulint data_size;
 	int i;
-	// Print trx_id and rollback pointer
-	for(i = 0; i < table->fields_count; i++) {
-		ulint len;
-		byte *field = rec_get_nth_field(rec, offsets, i, &len);
-
-		if (table->fields[i].type == FT_INTERNAL){
-			if (debug) printf("Field #%i @ %p: length %lu, value: ", i, field, len);
-			print_field_value(field, len, &(table->fields[i]), hex);
-			if (i < table->fields_count - 1) fprintf(f_result, "\t");
-			if (debug) printf("\n");
+        if (!output_sql_inserts) { 
+    		// Print trx_id and rollback pointer
+	    	for(i = 0; i < table->fields_count; i++) {
+    			ulint len;
+    			byte *field = rec_get_nth_field(rec, offsets, i, &len);
+	    
+		    	if (table->fields[i].type == FT_INTERNAL){
+	    			if (debug) printf("Field #%i @ %p: length %lu, value: ", i, field, len);
+	    			print_field_value(field, len, &(table->fields[i]), hex);
+		    		if (i < table->fields_count - 1) fprintf(f_result, "\t");
+		    		if (debug) printf("\n");
 			}
-	}
+		}
+        }
 
 	// Print table name
 	if (debug) {
 		printf("Processing record %p from table '%s'\n", rec, table->name);
 		rec_print_new(stdout, rec, offsets);
+	} else if (output_sql_inserts) {
+		fprintf(f_result, "INSERT INTO `%s` VALUES(", table->name);
 	} else {
 		fprintf(f_result, "%s\t", table->name);
 	}
-
 	data_size = rec_offs_data_size(offsets);
 
 	for(i = 0; i < table->fields_count; i++) {
@@ -179,9 +183,14 @@ ulint process_ibrec(page_t *page, rec_t *rec, table_def_t *table, ulint *offsets
                     }
 		    }
 
-		if (i < table->fields_count - 1) fprintf(f_result, "\t");
+		if (i < table->fields_count - 1) {
+		        if (output_sql_inserts)	fprintf(f_result, ",");
+		        else fprintf(f_result, "\t");
+		}
 		if (debug) printf("\n");
 	}
+        if (output_sql_inserts)
+		fprintf(f_result, ");");
 	fprintf(f_result, "\n");
 	return data_size; // point to the next possible record's start
 }
@@ -767,6 +776,7 @@ void usage() {
 	  "    -i <file> -- Read external pages at their offsets from <file>.\n"
 	  "    -p prefix -- Use prefix for a directory name in LOAD DATA INFILE command\n"
 	  "    -x -- Print text values in hexadecimal format.\n"
+	  "    -s -- Output format as Insert statements.\n"
 	  "\n"
 	);
 }
@@ -782,13 +792,21 @@ int main(int argc, char **argv) {
 	char buffer[BUFSIZ];
         setvbuf(stdout, buffer, _IOFBF, sizeof(buffer));
 
-	f_result = stdout;
-	f_sql = stderr;
-	char result_file[1024];
-	char sql_file[1024];
+	// Always append to the same file in the current directory
+	f_result = fopen("output.txt", "a");
+	if (f_result == NULL) {
+		fprintf(stderr, "Can't open output file for appending\n");
+		exit(EXIT_FAILURE);
+	}
+	f_sql = fopen("output.txt", "a");
+	if (f_sql == NULL) {
+		fprintf(stderr, "Can't open output file for appending\n");
+		exit(EXIT_FAILURE);
+	}
+
 	bool hex = 0;
 
-	while ((ch = getopt(argc, argv, "t:456hdDUVf:T:b:p:o:i:l:x")) != -1) {
+	while ((ch = getopt(argc, argv, "t:456hdDUVf:T:b:p:o:i:l:x:s")) != -1) {
 		switch (ch) {
 			case 'd':
 				deleted_pages_only = 1;
@@ -801,22 +819,14 @@ int main(int argc, char **argv) {
 			    undeleted_records_only = 1;
 				break;
 			case 'o':
-				strncpy(result_file, optarg, sizeof(result_file));
-				if(NULL == (f_result = fopen(result_file, "w"))){
-					fprintf(stderr, "Can't open file %s for writing\n", result_file);
-					exit(-1);
-					}
+				// No longer needed to handle 'o' since we always append to "output.txt"
 				break;
 			case 'i':
 				strncpy(path_ibdata, optarg, sizeof(path_ibdata));
                 external_in_ibdata = 1;
 				break;
             case 'l':
-                strncpy(sql_file, optarg, sizeof(sql_file));
-                if(NULL == (f_sql = fopen(sql_file, "w"))){
-                    fprintf(stderr, "Can't open file %s for writing\n", sql_file);
-                    exit(-1);
-                }
+                // No longer needed to handle 'l' since we always append to "output.txt"
                 break;
 			case 't':
 			    strncpy(table_schema, optarg, sizeof(table_schema));
@@ -842,6 +852,9 @@ int main(int argc, char **argv) {
                 break;
             case '6':
                 process_56 = 1;
+                break;
+            case 's':
+                output_sql_inserts = 1;
                 break;
             case 'T':
                 set_filter_id(optarg);
@@ -907,7 +920,7 @@ int main(int argc, char **argv) {
 		fprintf(f_sql, "%s/dumps/%s/%s", getenv("PWD"), dump_prefix, table->name);
 		}
 	else{
-		fprintf(f_sql, "%s", result_file);
+		fprintf(f_sql, "%s", "output.txt");
 		}
 	fprintf(f_sql, "' REPLACE INTO TABLE `%s` CHARACTER SET UTF8 FIELDS TERMINATED BY '\\t' OPTIONALLY ENCLOSED BY '\"' LINES STARTING BY '%s\\t' ", table->name, table->name);
 	int i = 0;
