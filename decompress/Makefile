@@ -1,4 +1,4 @@
-all: mysql decompress
+aall: mysql decompress
 
 decompress: decompress.c
 	libs=`find .lib/`
@@ -6,8 +6,9 @@ decompress: decompress.c
 	#g++ -DUNIV_DEBUG -DUNIV_ZIP_DEBUG -Iinclude -Iinclude/zlib -lpthread -lz -lm -ldl -lcrypt -lrt -lncurses 
 	g++ \
 	       	-DHAVE_CONFIG_H -DHAVE_IB_GCC_ATOMIC_BUILTINS=1 -DHAVE_IB_ATOMIC_PTHREAD_T_GCC=1 -DSIZEOF_PTHREAD_T=8 -Wall -g -DENABLED_DEBUG_SYNC -DSAFE_MUTEX -DUNIV_DEBUG  -DUNIV_LINUX -D_GNU_SOURCE=1 \
+                -laio \
 		-Iinclude -Iinclude/zlib \
-		-I ./mysql-5.5.16/include/ \
+		-I ./mysql-server-mysql-5.5.16/include/ \
 		-L/usr/lib/ -L/usr/lib64/ \
 		-lpthread -lz -lm -ldl -lcrypt -lrt -lncurses \
 		.lib/log0recv.c.o .lib/ut0dbg.c.o .lib/ut0ut.c.o .lib/ha_innodb.cc.o .lib/os0thread.c.o .lib/os0sync.c.o .lib/my_static.c.o .lib/rem0rec.c.o .lib/mem0mem.c.o .lib/trx0sys.c.o \
@@ -50,14 +51,14 @@ page0zip.o:
 	gcc -c -Iinclude -Iinclude/zlib page0zip.c 
 
 mysql:
-#	if ! test -d mysql-5.5.16 ; then wget http://www.percona.com/redir/downloads/community/mysql-5.5.16.tar.gz \
-#		tar zxf mysql-5.5.16.tar.gz ; fi 
-	cd mysql-5.5.16 && cmake . -DWITH_DEBUG=1 && make && cd -
+#	if ! test -d mysql-server-mysql-5.5.16 ; then wget http://www.percona.com/redir/downloads/community/mysql-server-mysql-5.5.16.tar.gz \
+#		tar zxf mysql-server-mysql-5.5.16.tar.gz ; fi 
+	cd mysql-server-mysql-5.5.16 && cmake . -DWITH_DEBUG=1 && make && cd -
 	mkdir -p .lib
-	find mysql-5.5.16 -name "*.o" -exec cp '{}' .lib/ \;
-	cp mysql-5.5.16/sql/CMakeFiles/sql.dir/tztime.cc.o .lib/
-	cp mysql-5.5.16/mysys/CMakeFiles/mysys.dir/thr_lock.c.o .lib/
-	cp mysql-5.5.16/sql/CMakeFiles/sql.dir/sql_string.cc.o .lib
+	find mysql-server-mysql-5.5.16 -name "*.o" -exec cp '{}' .lib/ \;
+	cp mysql-server-mysql-5.5.16/sql/CMakeFiles/sql.dir/tztime.cc.o .lib/
+	cp mysql-server-mysql-5.5.16/mysys/CMakeFiles/mysys.dir/thr_lock.c.o .lib/
+	cp mysql-server-mysql-5.5.16/sql/CMakeFiles/sql.dir/sql_string.cc.o .lib
 	
 clean:
 	rm -fr decompress .lib
