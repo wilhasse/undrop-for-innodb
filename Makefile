@@ -1,11 +1,12 @@
-OBJECTS = stream_parser.o c_parser.o
+OBJECTS = stream_parser.o c_parser.o tables_dict.o print_data.o check_data.o
 TARGETS = stream_parser c_parser innochecksum_changer
-SRCS = stream_parser.c include/mysql_def.h c_parser.c
-INC_PATH = -I./include
-LIBS = -pthread -lm
+SRCS = stream_parser.c include/mysql_def.h c_parser.c tables_dict.c print_data.c check_data.c
+INC_PATH = -I./include -I./decompress
+LIB_PATH = -L./decompress
+LIBS = -pthread -lm -lz -ldecompressl -lstdc++ -ldl -laio -lcrypt
 BINDIR ?= ./bin
 
-CC ?= gcc
+CC ?= g++
 INSTALL ?=install
 YACC = bison
 LEX = flex
@@ -60,7 +61,7 @@ innochecksum_changer: innochecksum.c include/innochecksum.h
 	$(CC) $(CFLAGS) $(LDFLAGS) $(INC_PATH) -o $@ $<
 
 sys_parser: sys_parser.c
-	@ which mysql_config || (echo "sys_parser needs mysql development package( either -devel or -dev)"; exit -1)
+	@ which mysql_config || (echo "sys_parser needs mysql development package (either -devel or -dev)"; exit -1)
 	$(CC) -o $@ $< `mysql_config --cflags` `mysql_config --libs`
 
 install: $(TARGETS)
@@ -70,26 +71,3 @@ clean:
 	rm -f $(OBJECTS) $(TARGETS) lex.yy.c sql_parser.c sql_parser.output sys_parser
 	rm -f *.o *.core
 	rm -rf omnibus-undrop-for-innodb/pkg/
-
-package: ## Build package - OS_VERSION can be: focal, jammy.
-	@docker run \
-		-v $(shell pwd):/undrop-for-innodb \
-		--name builder_undrop \
-		--rm \
-		--env OS_VERSION=${OS_VERSION} \
-		"twindb/omnibus-ubuntu:${OS_VERSION}" \
-		bash -l /undrop-for-innodb/omnibus-undrop-for-innodb/omnibus_build.sh
-
-
-docker-start:
-	@docker run \
-		-v $(shell pwd):/undrop-for-innodb \
-		-it \
-		--name builder_undrop \
-		--rm \
-		--dns 8.8.8.8 \
-		--dns 208.67.222.222 \
-		--env PLATFORM=${PLATFORM} \
-		--env OS_VERSION=${OS_VERSION} \
-		"twindb/omnibus-ubuntu:${OS_VERSION}" \
-		bash -l

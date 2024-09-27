@@ -47,6 +47,10 @@ extern ulint	ut_dbg_zero;
 /*************************************************************//**
 Report a failed assertion. */
 UNIV_INTERN
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 void
 ut_dbg_assertion_failed(
 /*====================*/
@@ -54,6 +58,9 @@ ut_dbg_assertion_failed(
 	const char*	file,	/*!< in: source file containing the assertion */
 	ulint		line)	/*!< in: line number of the assertion */
 	UNIV_COLD __attribute__((nonnull(2)));
+#ifdef __cplusplus
+}
+#endif
 
 #if defined(__WIN__) || defined(__INTEL_COMPILER)
 # undef UT_DBG_USE_ABORT

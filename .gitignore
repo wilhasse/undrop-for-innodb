@@ -7,3 +7,7 @@ lex.yy.c
 sql_parser.c
 stream_parser
 .DS_Store
+CPD_REL.ibd
+CPD_REL.sql
+CPD_REL_dec.ibd
+output.txt

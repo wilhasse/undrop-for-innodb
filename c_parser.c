@@ -1,3 +1,4 @@
+#include "decompress/decompressl.h"
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -9,7 +10,7 @@
 #include <sys/dir.h>
 
 //#include <error.h>
-#include <tables_dict.h>
+#include "tables_dict.h"
 #include <print_data.h>
 #include <check_data.h>
 #include <dirent.h>
@@ -73,6 +74,7 @@
 #define DIG_BASE     1000000000
 
 // Global flags from getopt
+int compressed_pages = 0;
 bool deleted_pages_only = 0;
 bool deleted_records_only = 0;
 bool undeleted_records_only = 1;
@@ -682,45 +684,85 @@ void process_ibpage(page_t *page, bool hex) {
 
 /*******************************************************************/
 void process_ibfile(int fn, bool hex) {
-	int read_bytes;
-	page_t *page = malloc(UNIV_PAGE_SIZE);
+    int read_bytes;
+    unsigned char *compressed_page_data = NULL;
+    page_t *page = NULL;  // Alias for decompressed page data
     struct stat st;
     off_t pos;
     ulint free_offset;
 
-	if (!page) {
-        fprintf(stderr, "Can't allocate page buffer!");
-        exit(EXIT_FAILURE);
+    if (compressed_pages) {
+        // Allocate buffers for compressed and decompressed data
+        compressed_page_data = malloc(8 * 1024);
+        page = malloc(UNIV_PAGE_SIZE);
+        if (!compressed_page_data || !page) {
+            fprintf(stderr, "Can't allocate necessary buffers!\n");
+            exit(EXIT_FAILURE);
         }
+    } else {
+        // Allocate buffer for uncompressed page data
+        page = malloc(UNIV_PAGE_SIZE);
+        if (!page) {
+            fprintf(stderr, "Can't allocate page buffer!\n");
+            exit(EXIT_FAILURE);
+        }
+    }
 
-
-	if (debug) printf("Read data from fn=%d...\n", fn);
+    if (debug) printf("Read data from fn=%d...\n", fn);
 
     // Get file info
     fstat(fn, &st);
 
-	// Read pages to the end of file
-	while ((read_bytes = read(fn, page, UNIV_PAGE_SIZE)) == UNIV_PAGE_SIZE) {
-        pos = lseek(fn, 0, SEEK_CUR);
+    if (compressed_pages) {
+        // Read and process compressed pages
+        while ((read_bytes = read(fn, compressed_page_data, 8 * 1024)) == 8 * 1024) {
+            pos = lseek(fn, 0, SEEK_CUR);
 
-        if (pos % (UNIV_PAGE_SIZE * 512) == 0) {
-            fprintf(f_sql, "-- %.2f%% done\n", 100.0 * pos / st.st_size);
+            if (pos % (UNIV_PAGE_SIZE * 512) == 0) {
+                fprintf(f_sql, "-- %.2f%% done\n", 100.0 * pos / st.st_size);
+            }
+
+            // Decompress the page
+            if (decompress_page(compressed_page_data, (unsigned char *)page) != 0) {
+                fprintf(stderr, "Failed to decompress page at offset %ld\n", pos);
+                continue;
+            }
+
+            if (deleted_pages_only) {
+                free_offset = page_header_get_field(page, PAGE_FREE);
+                if (page_header_get_field(page, PAGE_N_RECS) == 0 && free_offset == 0) continue;
+                if (free_offset > 0 && page_header_get_field(page, PAGE_GARBAGE) == 0) continue;
+                if (free_offset > UNIV_PAGE_SIZE) continue;
+            }
+
+            // Initialize table definitions (count nullable fields, data sizes, etc)
+            init_table_defs(page_is_comp(page));
+            process_ibpage(page, hex);
         }
+        free(compressed_page_data);
+    } else {
+        // Read and process uncompressed pages
+        while ((read_bytes = read(fn, page, UNIV_PAGE_SIZE)) == UNIV_PAGE_SIZE) {
+            pos = lseek(fn, 0, SEEK_CUR);
 
-	    if (deleted_pages_only) {
-    		free_offset = page_header_get_field(page, PAGE_FREE);
-    		if (page_header_get_field(page, PAGE_N_RECS) == 0 && free_offset == 0) continue;
-    		if (free_offset > 0 && page_header_get_field(page, PAGE_GARBAGE) == 0) continue;
-    		if (free_offset > UNIV_PAGE_SIZE) continue;
-    	}
+            if (pos % (UNIV_PAGE_SIZE * 512) == 0) {
+                fprintf(f_sql, "-- %.2f%% done\n", 100.0 * pos / st.st_size);
+            }
 
-        // Initialize table definitions (count nullable fields, data sizes, etc)
-        init_table_defs(page_is_comp(page));
-        process_ibpage(page, hex);
+            if (deleted_pages_only) {
+                free_offset = page_header_get_field(page, PAGE_FREE);
+                if (page_header_get_field(page, PAGE_N_RECS) == 0 && free_offset == 0) continue;
+                if (free_offset > 0 && page_header_get_field(page, PAGE_GARBAGE) == 0) continue;
+                if (free_offset > UNIV_PAGE_SIZE) continue;
+            }
 
-	}
-	free(page);
+            // Initialize table definitions (count nullable fields, data sizes, etc)
+            init_table_defs(page_is_comp(page));
+            process_ibpage(page, hex);
+        }
+    }
 
+    free(page);
 }
 
 /*******************************************************************/
@@ -763,6 +805,7 @@ void usage() {
 	  "    -o <file> -- Save dump in this file. Otherwise print to stdout\n"
 	  "    -l <file> -- Save SQL statements in this file. Otherwise print to stderr\n"
 	  "    -h  -- Print this help\n"
+          "    -C  -- Specify that the pages are compressed and need decompression (default = NO)\n"
 	  "    -d  -- Process only those pages which potentially could have deleted records (default = NO)\n"
 	  "    -D  -- Recover deleted rows only (default = NO)\n"
 	  "    -U  -- Recover UNdeleted rows only (default = YES)\n"
@@ -806,11 +849,14 @@ int main(int argc, char **argv) {
 
 	bool hex = 0;
 
-	while ((ch = getopt(argc, argv, "t:456hdDUVf:T:b:p:o:i:l:x:s")) != -1) {
+        while ((ch = getopt(argc, argv, "t:456hdDUVf:T:b:p:o:i:l:x:sC")) != -1) {
 		switch (ch) {
 			case 'd':
 				deleted_pages_only = 1;
 				break;
+                        case 'C':
+                                compressed_pages = 1;
+                                break;
 			case 'D':
 			    deleted_records_only = 1;
 			    undeleted_records_only = 0;

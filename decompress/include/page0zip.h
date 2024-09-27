@@ -106,6 +106,11 @@ Compress a page.
 @return TRUE on success, FALSE on failure; page_zip will be left
 intact on failure. */
 UNIV_INTERN
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 ibool
 page_zip_compress(
 /*==============*/
@@ -115,6 +120,10 @@ page_zip_compress(
 	dict_index_t*	index,	/*!< in: index of the B-tree node */
 	mtr_t*		mtr)	/*!< in: mini-transaction, or NULL */
 	__attribute__((nonnull(1,2,3)));
+
+#ifdef __cplusplus
+}
+#endif
 
 /**********************************************************************//**
 Decompress a page.  This function should tolerate errors on the compressed
