@@ -1,4 +1,4 @@
-#include "decompress/decompressl.h"
+//#include "decompress/decompressl.h"
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -87,6 +87,7 @@ char blob_dir[256] = ".";
 char dump_prefix[256] = "default";
 char path_ibdata[256];
 bool external_in_ibdata = 0;
+int last_id = 0;
 
 dulint filter_id;
 int use_filter_id = 0;
@@ -141,12 +142,13 @@ ut_print_buf(
 ulint process_ibrec(page_t *page, rec_t *rec, table_def_t *table, ulint *offsets, bool hex) {
 	ulint data_size;
 	int i;
+
         if (!output_sql_inserts) { 
     		// Print trx_id and rollback pointer
 	    	for(i = 0; i < table->fields_count; i++) {
     			ulint len;
     			byte *field = rec_get_nth_field(rec, offsets, i, &len);
-	    
+
 		    	if (table->fields[i].type == FT_INTERNAL){
 	    			if (debug) printf("Field #%i @ %p: length %lu, value: ", i, field, len);
 	    			print_field_value(field, len, &(table->fields[i]), hex);
@@ -155,6 +157,22 @@ ulint process_ibrec(page_t *page, rec_t *rec, table_def_t *table, ulint *offsets
 			}
 		}
         }
+
+	data_size = rec_offs_data_size(offsets);
+
+        // Only print certain IDs
+        /*if (table->fields_count > 3) {
+            ulint len;
+            byte *second_field = rec_get_nth_field(rec, offsets, 3, &len);
+            int id = get_int_value( &(table->fields[3]),second_field);
+            if (last_id != id) {
+                printf ("Processing ID_CR = %i \n",id);
+                last_id = id;
+            }
+            if (! (id > 6647709 && id < 6663938)) {
+                return data_size;
+            }
+        }*/
 
 	// Print table name
 	if (debug) {
@@ -165,7 +183,6 @@ ulint process_ibrec(page_t *page, rec_t *rec, table_def_t *table, ulint *offsets
 	} else {
 		fprintf(f_result, "%s\t", table->name);
 	}
-	data_size = rec_offs_data_size(offsets);
 
 	for(i = 0; i < table->fields_count; i++) {
 		ulint len;
@@ -723,10 +740,12 @@ void process_ibfile(int fn, bool hex) {
             }
 
             // Decompress the page
+            /*
             if (decompress_page(compressed_page_data, (unsigned char *)page) != 0) {
                 fprintf(stderr, "Failed to decompress page at offset %ld\n", pos);
                 continue;
             }
+            */
 
             if (deleted_pages_only) {
                 free_offset = page_header_get_field(page, PAGE_FREE);
@@ -766,23 +785,31 @@ void process_ibfile(int fn, bool hex) {
 }
 
 /*******************************************************************/
+
+// Add this function to handle opening input files
 int open_ibfile(char *fname) {
-	struct stat fstat;
-	int fn;
+    struct stat fstat;
+    int fn;
 
-	// Skip non-regular files
-	if (debug) printf("Opening file: %s\n", fname);
-	if (stat(fname, &fstat) != 0 || (fstat.st_mode & S_IFREG) != S_IFREG){
-        fprintf(stderr, "Invalid file specified!");
-        exit(EXIT_FAILURE);
-        }
-	fn = open(fname, O_RDONLY, 0);
-	if (!fn) {
-        fprintf(stderr, "Can't open file!");
-        exit(EXIT_FAILURE);
-        }
+    // Support reading from stdin when filename is "-"
+    if (strcmp(fname, "-") == 0) {
+        return STDIN_FILENO;
+    }
 
-	return fn;
+    // Skip non-regular files and non-FIFOs
+    if (debug) printf("Opening file: %s\n", fname);
+    if (stat(fname, &fstat) != 0 || (!S_ISREG(fstat.st_mode) && !S_ISFIFO(fstat.st_mode))) {
+        fprintf(stderr, "Invalid file specified!\n");
+        exit(EXIT_FAILURE);
+    }
+
+    fn = open(fname, O_RDONLY);
+    if (fn < 0) {  // Correctly check for open failure
+        perror("Can't open file");
+        exit(EXIT_FAILURE);
+    }
+
+    return fn;
 }
 
 /*******************************************************************/

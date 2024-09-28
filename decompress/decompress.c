@@ -1,9 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <unistd.h>  // Include for close() function
+#include <unistd.h>
+#include <sys/stat.h>
 
 #include "my_global.h"
 extern "C" {
@@ -16,8 +16,22 @@ int main(int argc, char** argv){
         return 1;
     }
 
-    int f1 = open(argv[1], O_RDONLY);
-    int f2 = open(argv[2], O_WRONLY | O_CREAT | O_APPEND, 0644);
+    // Handle input file
+    int f1;
+    if (strcmp(argv[1], "-") == 0) {
+        f1 = STDIN_FILENO;  // Read from stdin
+    } else {
+        f1 = open(argv[1], O_RDONLY);
+    }
+
+    // Handle output file
+    int f2;
+    if (strcmp(argv[2], "-") == 0) {
+        f2 = STDOUT_FILENO;  // Write to stdout
+    } else {
+        f2 = open(argv[2], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    }
+
     int start_page = argc > 3 ? atoi(argv[3]) : 0;
 
     page_zip_des_t* page_zip;
@@ -27,22 +41,34 @@ int main(int argc, char** argv){
     os_sync_init();
     sync_init();
 
-    if(-1 == f1) {
-        fprintf(stderr, "Can't open file %s\n", argv[1]);
+    // Error checking for input file
+    if(f1 < 0) {
+        fprintf(stderr, "Can't open input file %s\n", argv[1]);
+        perror("open");
         return 1;
     }
-    if(-1 == f2) {
-        fprintf(stderr, "Can't open file %s\n", argv[2]);
+
+    // Error checking for output file
+    if(f2 < 0) {
+        fprintf(stderr, "Can't open output file %s\n", argv[2]);
+        perror("open");
         return 1;
     }
 
     struct stat st;
-    if (fstat(f1, &st) == -1) {
-        fprintf(stderr, "Can't get file size for %s\n", argv[1]);
-        return 1;
+    off_t file_size = 0;
+    int estimated_pages = 0;
+
+    // Only perform fstat if input is a regular file
+    if (f1 != STDIN_FILENO) {
+        if (fstat(f1, &st) == -1) {
+            fprintf(stderr, "Can't get file size for %s\n", argv[1]);
+            perror("fstat");
+            return 1;
+        }
+        file_size = st.st_size;
+        estimated_pages = file_size / (8 * 1024);
     }
-    off_t file_size = st.st_size;
-    int estimated_pages = file_size / (8 * 1024);
 
     fprintf(stderr," *********************** Decompressing pages .... *************** \n");
     fprintf(stderr,"File size: %ld bytes\n", file_size);
@@ -108,8 +134,14 @@ int main(int argc, char** argv){
     free(page);
     free(page_zip->data);
     free(page_zip);
-    close(f1);
-    close(f2);
+
+    // Close file descriptors if they're not stdin/stdout
+    if (f1 != STDIN_FILENO) {
+        close(f1);
+    }
+    if (f2 != STDOUT_FILENO) {
+        close(f2);
+    }
 
     return 0;
 }
